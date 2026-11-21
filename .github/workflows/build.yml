@@ -1,0 +1,56 @@
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解包源码
+        run: |
+          echo "=== 仓库内容 ==="
+          ls -la
+          if [ -f AUGLike_src.zip ]; then
+            echo "发现 zip，解包中"
+            unzip -o -q AUGLike_src.zip
+          fi
+          if [ ! -f Makefile ] && [ -f aug_like/Makefile ]; then
+            cp -r aug_like/* .
+          fi
+          echo "=== 解包后 ==="
+          ls -la
+          test -f Makefile || (echo "没找到 Makefile" && exit 1)
+
+      - name: 安装 Theos
+        run: |
+          export THEOS=$HOME/theos
+          git clone --recursive --depth 1 https://github.com/theos/theos.git $THEOS
+          mkdir -p $THEOS/sdks
+          SDK_URL=$(curl -sL https://api.github.com/repos/theos/sdks/releases/latest \
+            | python3 -c "import sys,json;d=json.load(sys.stdin);print([a['browser_download_url'] for a in d['assets'] if 'iPhoneOS16.5.sdk' in a['name']][0])")
+          echo "SDK: $SDK_URL"
+          curl -L -o /tmp/sdk.tar.xz "$SDK_URL"
+          tar -xJf /tmp/sdk.tar.xz -C $THEOS/sdks
+          echo "THEOS=$THEOS" >> $GITHUB_ENV
+
+      - name: 拉 ImGui
+        run: git clone --depth 1 --branch v1.90.9 https://github.com/ocornut/imgui.git imgui
+
+      - name: 编译
+        run: make -j4
+
+      - name: 收集产物
+        run: |
+          mkdir -p dist
+          find .theos -name "*.dylib" -exec cp {} dist/ \;
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AUGLike-dylib
+          path: dist/*.dylib
+          if-no-files-found: error
